@@ -8,8 +8,47 @@
 </head>
 <body>
     <div class="welcome-container">
-        <h1>¡Bienvenido!</h1>
-        <p>Has iniciado sesión correctamente.</p>
+        <h1 id="welcomeMessage">Cargando...</h1>
+        <p>Has iniciado sesión correctamente y estás viendo contenido protegido.</p>
+        <button id="logoutButton">Cerrar Sesión</button>
     </div>
+
+    <script>
+        const token = localStorage.getItem('token');
+        const welcomeMessage = document.getElementById('welcomeMessage');
+        const logoutButton = document.getElementById('logoutButton');
+
+        // Si no hay token, no se puede estar aquí
+        if (!token) {
+            window.location.href = '/login';
+        } else {
+            // Usa el token para pedir los datos protegidos
+            fetch('/api/data', {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            })
+            .then(res => {
+                if (!res.ok) {
+                    throw new Error('Token inválido o expirado.');
+                }
+                return res.json();
+            })
+            .then(data => {
+                welcomeMessage.textContent = data.message;
+            })
+            .catch(err => {
+                console.error('Error de autenticación:', err);
+                localStorage.removeItem('token'); // Limpia el token inválido
+                window.location.href = '/login';
+            });
+        }
+        
+        logoutButton.addEventListener('click', () => {
+            localStorage.removeItem('token');
+            window.location.href = '/login';
+        });
+    </script>
 </body>
 </html>

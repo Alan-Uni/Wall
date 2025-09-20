@@ -8,8 +8,9 @@
 </head>
 <body>
     <div class="login-container">
-        <form action="/login" method="post" class="login-form">
+        <form id="loginForm" class="login-form">
             <h2>Iniciar Sesión</h2>
+            <div id="errorMessage" style="color:red; margin-bottom: 1rem;"></div>
             <div class="input-group">
                 <label for="username">Usuario</label>
                 <input type="text" id="username" name="username" required>
@@ -21,5 +22,33 @@
             <button type="submit">Ingresar</button>
         </form>
     </div>
+
+    <script>
+        const form = document.getElementById('loginForm');
+        const errorMessage = document.getElementById('errorMessage');
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            errorMessage.textContent = '';
+
+            const username = form.username.value;
+            const password = form.password.value;
+
+            const res = await fetch('/api/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password })
+            });
+
+            if (res.ok) {
+                const data = await res.json();
+                localStorage.setItem('token', data.accessToken); // Guarda el token
+                window.location.href = '/inicio'; // Redirige a la página de inicio
+            } else {
+                const error = await res.json();
+                errorMessage.textContent = error.message;
+            }
+        });
+    </script>
 </body>
 </html>

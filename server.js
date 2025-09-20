@@ -1,91 +1,127 @@
+require('dotenv').config();
 const express = require('express');
 const { MongoClient } = require('mongodb');
 const bodyParser = require('body-parser');
 const path = require('path');
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
+const helmet = require('helmet');
 
 const app = express();
 const port = 3000;
 
-// --- Configuración de MongoDB ---
-const url = 'mongodb://localhost:27017'; // URL de conexión a MongoDB
-const dbName = 'TryIt'; // Nombre de tu base de datos
-const client = new MongoClient(url);
+// --- Configuración de MongoDB y JWT ---
+const client = new MongoClient(process.env.MONGO_URI);
+const dbName = 'TryIt';
+const JWT_SECRET = process.env.JWT_SECRET;
+
+// ✅ Variable para almacenar la conexión a la base de datos y reutilizarla
+let db;
 
 // --- Middleware ---
-// Parsea los cuerpos de las solicitudes entrantes en formato URL-encoded
-app.use(bodyParser.urlencoded({ extended: true }));
-// Sirve archivos estáticos (HTML, CSS) desde la carpeta 'public'
+app.use(
+    helmet.contentSecurityPolicy({
+        directives: {
+            defaultSrc: ["'self'"],
+            // 👇 CORREGIDO: Usa el NUEVO hash y sin comillas extra
+           scriptSrc: ["'self'", "'unsafe-inline'"],
+        },
+    })
+);
+app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-/**
- * Función para configurar la base de datos al iniciar el servidor.
- * Crea un usuario por defecto si la colección está vacía.
- */
-async function setupDatabase() {
-    try {
-        await client.connect();
-        console.log("Conectado a MongoDB para la configuración inicial.");
-        const db = client.db(dbName);
-        const collection = db.collection('users');
-
-        // Revisa si ya existe algún usuario
-        const userCount = await collection.countDocuments();
-        if (userCount === 0) {
-            // Si no hay usuarios, inserta uno por defecto
-            await collection.insertOne({ username: "usuario", password: "123" });
-            console.log("Base de datos 'TryIt' y colección 'users' configuradas con un usuario de prueba.");
-        } else {
-            console.log("La colección 'users' ya contiene datos.");
-        }
-    } catch (err) {
-        console.error("Error durante la configuración de la base de datos:", err);
-    } finally {
-        await client.close();
-    }
-}
-
-
-// --- Rutas de la aplicación ---
-
-// Ruta para servir la página de login
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'login.html'));
+// Middleware para hacer la conexión 'db' accesible en todas las rutas
+app.use((req, res, next) => {
+    req.db = db;
+    next();
 });
 
-// Ruta para manejar el proceso de login
-app.post('/login', async (req, res) => {
+function authenticateToken(req, res, next) {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+    if (token == null) return res.sendStatus(401);
+    jwt.verify(token, JWT_SECRET, (err, user) => {
+        if (err) return res.sendStatus(403);
+        req.user = user;
+        next();
+    });
+}
+
+// --- Rutas de la API ---
+// Ahora las rutas son más limpias, ya no manejan la conexión/desconexión
+
+app.post('/api/register', async (req, res) => {
     const { username, password } = req.body;
-    let localClient; // Cliente local para esta operación
-
+    if (!username || !password) {
+        return res.status(400).json({ message: 'Usuario y contraseña son requeridos.' });
+    }
     try {
-        localClient = new MongoClient(url);
-        await localClient.connect();
-        const db = localClient.db(dbName);
-        const collection = db.collection('users');
+        const collection = req.db.collection('users');
+        const hashedPassword = await bcrypt.hash(password, 10);
+        await collection.insertOne({ username, password: hashedPassword });
+        res.status(201).json({ message: 'Usuario registrado exitosamente.' });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Error al registrar el usuario.' });
+    }
+});
 
-        // Busca al usuario en la base de datos
-        const user = await collection.findOne({ username: username });
-
-        // Valida la contraseña (en un proyecto real, deberías usar hashing)
-        if (user && user.password === password) {
-            // Si las credenciales son correctas, redirige a la página de inicio
-            res.redirect('/inicio.html');
+app.post('/api/login', async (req, res) => {
+    const { username, password } = req.body;
+    try {
+        const user = await req.db.collection('users').findOne({ username });
+        if (user && await bcrypt.compare(password, user.password)) {
+            const accessToken = jwt.sign({ username: user.username }, JWT_SECRET, { expiresIn: '1h' });
+            res.json({ accessToken: accessToken });
         } else {
-            // Si las credenciales son incorrectas
-            res.send('Usuario o contraseña incorrectos. <a href="/">Volver a intentar</a>');
+            res.status(401).json({ message: 'Credenciales inválidas.' });
         }
     } catch (err) {
         console.error(err);
-        res.status(500).send('Error en el servidor durante el inicio de sesión.');
-    } finally {
-        if (localClient) {
-            await localClient.close();
-        }
+        res.status(500).json({ message: 'Error en el servidor.' });
     }
 });
 
-// Inicia el servidor y llama a la configuración de la BD
-app.listen(port, () => {
-    console.log(`🚀 Servidor corriendo en http://localhost:${port}`);
-    setupDatabase(); // Ejecuta la configuración de la base de datos
+// --- Rutas de las páginas ---
+
+app.get('/', (req, res) => {
+    res.redirect('/login');
 });
+
+app.get('/login', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
+app.get('/inicio', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'inicio.html'));
+});
+
+app.get('/api/data', authenticateToken, (req, res) => {
+    res.json({ message: `¡Bienvenido ${req.user.username}! Estos son datos protegidos.` });
+});
+
+
+// ✅ Función principal para conectar a la BD y luego iniciar el servidor
+async function startServer() {
+    try {
+        // Conectar a MongoDB UNA SOLA VEZ
+        await client.connect();
+        db = client.db(dbName); // Asigna la conexión a la variable global 'db'
+        
+        // Este es el mensaje que esperabas
+        console.log(`✅ Conectado exitosamente a la base de datos: ${dbName}`);
+
+        // Solo si la conexión es exitosa, se inicia el servidor
+        app.listen(port, () => {
+            console.log(`🚀 Servidor corriendo en http://localhost:${port}`);
+        });
+
+    } catch (err) {
+        console.error("❌ No se pudo conectar a la base de datos.", err);
+        process.exit(1); // Si no hay BD, el servidor no debe iniciar
+    }
+}
+
+// Llama a la función para iniciar todo el proceso
+startServer();

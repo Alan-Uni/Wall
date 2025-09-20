@@ -6,9 +6,16 @@ const path = require('path');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const helmet = require('helmet');
+const https = require('https'); // ✅ Importa el módulo https
+const fs = require('fs'); // ✅ Importa el módulo File System
 
 const app = express();
 const port = 3000;
+
+const httpsOptions = {
+    key: fs.readFileSync(path.join(__dirname, 'localhost-key.pem')),
+    cert: fs.readFileSync(path.join(__dirname, 'localhost.pem'))
+};
 
 // --- Configuración de MongoDB y JWT ---
 const client = new MongoClient(process.env.MONGO_URI);
@@ -113,8 +120,8 @@ async function startServer() {
         console.log(`✅ Conectado exitosamente a la base de datos: ${dbName}`);
 
         // Solo si la conexión es exitosa, se inicia el servidor
-        app.listen(port, () => {
-            console.log(`🚀 Servidor corriendo en http://localhost:${port}`);
+        https.createServer(httpsOptions, app).listen(port, () => {
+            console.log(`🚀 Servidor corriendo de forma segura en https://localhost:${port}`);
         });
 
     } catch (err) {

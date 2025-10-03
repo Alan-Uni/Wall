@@ -6,8 +6,8 @@ const path = require('path');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const helmet = require('helmet');
-const https = require('https'); // ✅ Importa el módulo https
-const fs = require('fs'); // ✅ Importa el módulo File System
+const https = require('https');
+const fs = require('fs'); 
 
 const app = express();
 const port = 3000;
@@ -17,20 +17,16 @@ const httpsOptions = {
     cert: fs.readFileSync(path.join(__dirname, 'localhost.pem'))
 };
 
-// --- Configuración de MongoDB y JWT ---
 const client = new MongoClient(process.env.MONGO_URI);
 const dbName = 'TryIt';
 const JWT_SECRET = process.env.JWT_SECRET;
 
-// ✅ Variable para almacenar la conexión a la base de datos y reutilizarla
 let db;
 
-// --- Middleware ---
 app.use(
     helmet.contentSecurityPolicy({
         directives: {
             defaultSrc: ["'self'"],
-            // 👇 CORREGIDO: Usa el NUEVO hash y sin comillas extra
            scriptSrc: ["'self'", "'unsafe-inline'"],
         },
     })
@@ -38,7 +34,6 @@ app.use(
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Middleware para hacer la conexión 'db' accesible en todas las rutas
 app.use((req, res, next) => {
     req.db = db;
     next();
@@ -55,8 +50,6 @@ function authenticateToken(req, res, next) {
     });
 }
 
-// --- Rutas de la API ---
-// Ahora las rutas son más limpias, ya no manejan la conexión/desconexión
 
 app.post('/api/register', async (req, res) => {
     const { username, password } = req.body;
@@ -90,7 +83,6 @@ app.post('/api/login', async (req, res) => {
     }
 });
 
-// --- Rutas de las páginas ---
 
 app.get('/', (req, res) => {
     res.redirect('/login');
@@ -109,26 +101,21 @@ app.get('/api/data', authenticateToken, (req, res) => {
 });
 
 
-// ✅ Función principal para conectar a la BD y luego iniciar el servidor
 async function startServer() {
     try {
-        // Conectar a MongoDB UNA SOLA VEZ
         await client.connect();
-        db = client.db(dbName); // Asigna la conexión a la variable global 'db'
+        db = client.db(dbName); 
         
-        // Este es el mensaje que esperabas
         console.log(`✅ Conectado exitosamente a la base de datos: ${dbName}`);
 
-        // Solo si la conexión es exitosa, se inicia el servidor
         https.createServer(httpsOptions, app).listen(port, () => {
             console.log(`🚀 Servidor corriendo de forma segura en https://localhost:${port}`);
         });
 
     } catch (err) {
         console.error("❌ No se pudo conectar a la base de datos.", err);
-        process.exit(1); // Si no hay BD, el servidor no debe iniciar
+        process.exit(1); 
     }
 }
 
-// Llama a la función para iniciar todo el proceso
 startServer();
